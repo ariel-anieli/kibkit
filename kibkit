@@ -27,12 +27,11 @@ head = {'Content-Type' : 'application/json',
 }
 
 def get_id_and_tle_for_dashboards(objs):
-    return functools.reduce(
+    return [functools.reduce(
         lambda _IN, FUNC: FUNC(_IN),
-        [lambda i : map(lambda obj: (obj["id"],obj["attributes"]["title"]), i),
-         lambda i : map(lambda pair: "{},{}".format(pair[0], pair[1]), i),
-         lambda i : '\n'.join(i)
-        ], objs)
+        [lambda obj: (obj["id"],obj["attributes"]["title"]),
+         lambda pair: "{},{}".format(pair[0], pair[1])],
+        obj) for obj in objs]
 
 def get_params(query):
     url   = {'fd' : 'saved_objects/_find',
@@ -78,12 +77,11 @@ if __name__=="__main__":
             lambda _IN, FUNC: FUNC(_IN),
             [lambda param : req(get_params(param)),
              lambda rsp   : json.loads(rsp.text)["saved_objects"],
-             get_id_and_tle_for_dashboards,
+             lambda objs  : '\n'.join(get_id_and_tle_for_dashboards(objs)),
              logging.info],
             param) for param in ['fd']]
         
     elif args.list_dashboard:
-        #ARGS = get_params('ld')
 
         req  = lambda ARGS : requests.post(
             base + ARGS['url'],
@@ -95,23 +93,22 @@ if __name__=="__main__":
             headers = head,
             json    = [{'type': 'visualization', 'id': _id}])
 
-        get_vz_names_within_dashboard = lambda objs: functools.reduce(
+        get_vz_tle_in_dashboard = lambda objs: [functools.reduce(
             lambda _IN, FUNC: FUNC(_IN),
-            [lambda i : filter(lambda obj : obj['type']=='visualization', i),
-             lambda i : map(lambda obj    : rq_vz(obj['id']), i),
-             lambda i : map(lambda req    : json.loads(req.text), i),
-             lambda i : map(lambda resp   : resp['saved_objects'][0]['attributes'], i),
-             lambda i : map(lambda rsp    : json.loads(rsp['visState'])['title'], i),
-             lambda i : '\n'.join(i)
-        ], objs)
+            [lambda obj  : rq_vz(obj['id']),
+             lambda req  : json.loads(req.text),
+             lambda resp : resp['saved_objects'][0]['attributes'],
+             lambda rsp  : json.loads(rsp['visState'])['title']
+            ], obj) for obj in objs if obj['type']=='visualization']
 
-        [functools.reduce(lambda _IN, FUNC: FUNC(_IN),
-                          [lambda param : req(get_params(param)),
-                           lambda rsp   : json.loads(rsp.text),
-                           lambda obj   : obj['saved_objects'][0]['references'],
-                           get_vz_tle,
-                           logging.info],
-                          param) for param in ['ld']]
+        [functools.reduce(
+            lambda _IN, FUNC: FUNC(_IN),
+            [lambda param : req(get_params(param)),
+             lambda rsp   : json.loads(rsp.text),
+             lambda obj   : obj['saved_objects'][0]['references'],
+             lambda objs  : '\n'.join(get_vz_tle_in_dashboard(objs)),
+             logging.info
+            ], param) for param in ['ld']]
 
     elif args.show_visualization:
         viz, db = args.show_visualization.split(',')
