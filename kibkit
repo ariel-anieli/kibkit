@@ -26,6 +26,14 @@ head = {'Content-Type' : 'application/json',
         'kbn-xsrf'     : ''.join(map(gen_rdm_hex, range(32)))
 }
 
+def get_id_and_tle_for_dashboards(objs):
+    return functools.reduce(
+        lambda _IN, FUNC: FUNC(_IN),
+        [lambda i : map(lambda obj: (obj["id"],obj["attributes"]["title"]), i),
+         lambda i : map(lambda pair: "{},{}".format(pair[0], pair[1]), i),
+         lambda i : '\n'.join(i)
+        ], objs)
+
 def get_params(query):
     url   = {'fd' : 'saved_objects/_find',
              'ld' : 'saved_objects/_bulk_get'}[query]
@@ -71,14 +79,7 @@ if __name__=="__main__":
             [get_params,
              req,
              lambda rsp: json.loads(rsp.text)["saved_objects"],
-             lambda objs: functools.reduce(
-                 lambda _IN, FUNC: FUNC(_IN),
-                 [lambda _in: map(lambda obj: (obj["id"],obj["attributes"]["title"]), _in),
-                  lambda _in: map(lambda pair: "{},{}".format(pair[0], pair[1]), _in),
-                  lambda _in: '\n'.join(_in)
-                 ],
-                 objs
-             ),
+             get_id_and_tle_for_dashboards,
              logging.info],
             param) for param in ['fd']]
         
