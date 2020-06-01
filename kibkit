@@ -76,35 +76,42 @@ if __name__=="__main__":
 
         [functools.reduce(
             lambda _IN, FUNC: FUNC(_IN),
-            [get_params,
-             req,
-             lambda rsp: json.loads(rsp.text)["saved_objects"],
+            [lambda param : req(get_params(param)),
+             lambda rsp   : json.loads(rsp.text)["saved_objects"],
              get_id_and_tle_for_dashboards,
              logging.info],
             param) for param in ['fd']]
         
     elif args.list_dashboard:
-        ARGS = get_params('ld')
+        #ARGS = get_params('ld')
 
-        req  = requests.post(
+        req  = lambda ARGS : requests.post(
             base + ARGS['url'],
             headers = head,
             json    = [{'type': ARGS['type'], 'id': args.list_dashboard}])
 
         rq_vz  = lambda _id: requests.post(
-            base + ARGS['url'],
+            base + get_params('ld')['url'],
             headers = head,
             json    = [{'type': 'visualization', 'id': _id}])
 
+        get_vz_tle = lambda objs: functools.reduce(
+            lambda _IN, FUNC: FUNC(_IN),
+            [lambda i : filter(lambda obj : obj['type']=='visualization', i),
+             lambda i : map(lambda obj    : rq_vz(obj['id']), i),
+             lambda i : map(lambda req    : json.loads(req.text), i),
+             lambda i : map(lambda resp   : resp['saved_objects'][0]['attributes'], i),
+             lambda i : map(lambda rsp    : json.loads(rsp['visState'])['title'], i),
+             lambda i : '\n'.join(i)
+        ], objs)
+
         [functools.reduce(lambda _IN, FUNC: FUNC(_IN),
-                          [lambda obj  : rq_vz(obj['id']),
-                           lambda req  : json.loads(req.text),
-                           lambda resp : resp['saved_objects'][0]['attributes'],
-                           lambda rsp  : json.loads(rsp['visState'])['title'],
+                          [lambda param : req(get_params(param)),
+                           lambda rsp   : json.loads(rsp.text),
+                           lambda obj   : obj['saved_objects'][0]['references'],
+                           get_vz_tle,
                            logging.info],
-                          OBJ)
-         for OBJ in json.loads(req.text)['saved_objects'][0]['references']
-         if OBJ['type']=='visualization']
+                          param) for param in ['ld']]
 
     elif args.show_visualization:
         viz, db = args.show_visualization.split(',')
