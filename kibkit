@@ -95,7 +95,7 @@ if __name__=="__main__":
             headers = head,
             json    = [{'type': 'visualization', 'id': _id}])
 
-        get_vz_tle = lambda objs: functools.reduce(
+        get_vz_names_within_dashboard = lambda objs: functools.reduce(
             lambda _IN, FUNC: FUNC(_IN),
             [lambda i : filter(lambda obj : obj['type']=='visualization', i),
              lambda i : map(lambda obj    : rq_vz(obj['id']), i),
