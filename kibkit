@@ -12,7 +12,7 @@ logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-u', '--user-credentials', required=True)
-parser.add_argument('-H', '--host', required=True)
+parser.add_argument('-H', '--host',             required=True)
 group  = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('-fd',  '--find-dashboard', nargs='?', const=True)
 group.add_argument('-ld', '--list-dashboard')
@@ -39,25 +39,48 @@ def get_params(query):
 def parse_aggs(init, entry):
 
     if entry['type']=='cardinality':
-        init['aggs'][entry['id']]  = {'cardinality': {'field':entry['params']['field']}}
+        init['aggs'][entry['id']]  = {
+            'cardinality': {
+                'field' : entry['params']['field']
+            }
+        }
+
     elif entry['type']=='terms':
-        init['vars'][entry['id']] = {'terms': {'field' : entry['params']['field'],
-                                      'order' : {'_count':entry['params']['order']},
-                                      'size'  : entry['params']['size']}}
+        init['vars'][entry['id']] = {
+            'terms': {
+                'field' : entry['params']['field'],
+                'order' : {
+                    '_count' : entry['params']['order']
+                },
+                'size'  : entry['params']['size']
+            }
+        }
+
     return init
 
 if __name__=="__main__":
 
     if args.find_dashboard:
-        ARGS = get_params('fd')
 
-        req  = requests.get(
-            base + ARGS['url'],
-            headers = head,
-            params  = {'type': ARGS['type']})
+        req  = lambda ARGS : requests.get(base + ARGS['url'],
+                                          headers = head,
+                                          params  = {'type': ARGS['type']})
 
-        [logging.info("{},{}".format(obj["id"],obj["attributes"]["title"]))
-         for obj in json.loads(req.text)["saved_objects"]]
+        [functools.reduce(
+            lambda _IN, FUNC: FUNC(_IN),
+            [get_params,
+             req,
+             lambda rsp: json.loads(rsp.text)["saved_objects"],
+             lambda objs: functools.reduce(
+                 lambda _IN, FUNC: FUNC(_IN),
+                 [lambda _in: map(lambda obj: (obj["id"],obj["attributes"]["title"]), _in),
+                  lambda _in: map(lambda pair: "{},{}".format(pair[0], pair[1]), _in),
+                  lambda _in: '\n'.join(_in)
+                 ],
+                 objs
+             ),
+             logging.info],
+            param) for param in ['fd']]
         
     elif args.list_dashboard:
         ARGS = get_params('ld')
