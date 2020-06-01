@@ -1,0 +1,139 @@
+#!/usr/bin/python
+
+import argparse
+import functools
+import logging
+import json
+import random
+import requests
+import string
+
+logging.basicConfig(format='%(message)s', level=logging.INFO)
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-u', '--user-credentials', required=True)
+parser.add_argument('-H', '--host', required=True)
+group  = parser.add_mutually_exclusive_group(required=True)
+group.add_argument('-fd',  '--find-dashboard', nargs='?', const=True)
+group.add_argument('-ld', '--list-dashboard')
+group.add_argument('-sv', '--show-visualization')
+args = parser.parse_args()        
+
+gen_rdm_hex = lambda i : random.choice(string.hexdigits)
+
+base = 'http://{}@{}/api/'.format(args.user_credentials, args.host)
+head = {'Content-Type' : 'application/json',
+        'kbn-xsrf'     : ''.join(map(gen_rdm_hex, range(32)))
+}
+
+def get_params(query):
+    url   = {'fd' : 'saved_objects/_find',
+             'ld' : 'saved_objects/_bulk_get'}[query]
+
+    _type = {'fd' : 'dashboard',
+             'ld' : 'dashboard'}[query]
+
+    return {'url'  : url,
+            'type' : _type}
+
+def parse_aggs(init, entry):
+
+    if entry['type']=='cardinality':
+        init['aggs'][entry['id']]  = {'cardinality': {'field':entry['params']['field']}}
+    elif entry['type']=='terms':
+        init['vars'][entry['id']] = {'terms': {'field' : entry['params']['field'],
+                                      'order' : {'_count':entry['params']['order']},
+                                      'size'  : entry['params']['size']}}
+    return init
+
+if __name__=="__main__":
+
+    if args.find_dashboard:
+        ARGS = get_params('fd')
+
+        req  = requests.get(
+            base + ARGS['url'],
+            headers = head,
+            params  = {'type': ARGS['type']})
+
+        [logging.info("{},{}".format(obj["id"],obj["attributes"]["title"]))
+         for obj in json.loads(req.text)["saved_objects"]]
+        
+    elif args.list_dashboard:
+        ARGS = get_params('ld')
+
+        req  = requests.post(
+            base + ARGS['url'],
+            headers = head,
+            json    = [{'type': ARGS['type'], 'id': args.list_dashboard}])
+
+        rq_vz  = lambda _id: requests.post(
+            base + ARGS['url'],
+            headers = head,
+            json    = [{'type': 'visualization', 'id': _id}])
+
+        [functools.reduce(lambda _IN, FUNC: FUNC(_IN),
+                          [lambda obj  : rq_vz(obj['id']),
+                           lambda req  : json.loads(req.text),
+                           lambda resp : resp['saved_objects'][0]['attributes'],
+                           lambda rsp  : json.loads(rsp['visState'])['title'],
+                           logging.info],
+                          OBJ)
+         for OBJ in json.loads(req.text)['saved_objects'][0]['references']
+         if OBJ['type']=='visualization']
+
+    elif args.show_visualization:
+        viz, db = args.show_visualization.split(',')
+        ARGS = get_params('ld')
+
+        req  = requests.post(
+            base + ARGS['url'],
+            headers = head,
+            json    = [{'type': ARGS['type'], 'id': db}])
+
+        query = json.loads(functools.reduce(lambda dct, key: dct[key],
+                                            ['saved_objects',
+                                             0,
+                                             'attributes',
+                                             'kibanaSavedObjectMeta',
+                                             'searchSourceJSON'],
+                                            json.loads(req.text)))#['filter'][0]['query']
+
+        logging.debug(query)
+
+        rq_vz  = lambda _id: requests.post(
+            base + ARGS['url'],
+            headers = head,
+            json    = [{'type': 'visualization', 'id': _id}])
+
+        vz_states = [functools.reduce(
+            lambda _IN, FUNC: FUNC(_IN),
+            [lambda obj  : rq_vz(obj['id']),
+             lambda req  : json.loads(req.text),
+             lambda resp : resp['saved_objects'][0]['attributes'],
+             lambda rsp  : json.loads(rsp['visState'])],
+            OBJ)
+        for OBJ in json.loads(req.text)['saved_objects'][0]['references']
+        if OBJ['type']=='visualization']
+
+        vz_aggs = [state['aggs'] for state in vz_states if state['title']==viz].pop()
+        logging.debug(vz_aggs)
+
+        AGGS = functools.reduce(parse_aggs,
+                                vz_aggs,
+                                {'vars':{}, 'aggs':{}})
+
+        logging.debug(AGGS)
+
+        for var in list(AGGS['vars']):
+            AGGS['vars'][var]['aggs'] = AGGS['aggs']
+        
+        QRY = {'aggs': AGGS['vars']}
+        logging.info(QRY)
+
+        req  = requests.post(
+            'http://kib.crt.fortilab.net/elasticsearch/dev_*/_search?rest_total_hits_as_int=true&ignore_unavailable=true&ignore_throttled=true&preference=1589486987394&timeout=30000ms',
+            headers = head,
+            json    = QRY)
+
+        logging.info(json.loads(req.text)['aggregations'])
