@@ -21,7 +21,7 @@ args = parser.parse_args()
 
 gen_rdm_hex = lambda i : random.choice(string.hexdigits)
 
-base = 'http://{}@{}/api/'.format(args.user_credentials, args.host)
+base = 'http://{}@{}'.format(args.user_credentials, args.host)
 head = {'Content-Type' : 'application/json',
         'kbn-xsrf'     : ''.join(map(gen_rdm_hex, range(32)))
 }
@@ -34,8 +34,8 @@ def get_id_and_tle_for_dashboards(objs):
         obj) for obj in objs]
 
 def get_params(query):
-    url   = {'fd' : 'saved_objects/_find',
-             'ld' : 'saved_objects/_bulk_get'}[query]
+    url   = {'fd' : '/api/saved_objects/_find',
+             'ld' : '/api/saved_objects/_bulk_get'}[query]
 
     _type = {'fd' : 'dashboard',
              'ld' : 'dashboard'}[query]
@@ -138,7 +138,7 @@ if __name__=="__main__":
             json    = [{'type': 'visualization', 'id': _id}])
 
         rq_viz_data = lambda QRY: requests.post(
-            'http://kib.crt.fortilab.net/elasticsearch/dev_*/_search?',
+            base + '/elasticsearch/dev_*/_search?',
             json    = QRY,
             headers = head,
             params  = {'timeout'                : '30000ms',
