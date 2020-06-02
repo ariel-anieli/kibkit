@@ -112,56 +112,52 @@ if __name__=="__main__":
 
     elif args.show_visualization:
         viz, db = args.show_visualization.split(',')
-        ARGS = get_params('ld')
 
-        req  = requests.post(
+        build_payload_from_aggs = lambda aggs: {
+            'aggs' : {var_k : {'terms' : aggs['vars'][var_k]['terms'],
+                               'aggs'  : aggs['aggs']}
+                      for var_k in aggs['vars']}}
+
+        req  = lambda ARGS: requests.post(
             base + ARGS['url'],
             headers = head,
             json    = [{'type': ARGS['type'], 'id': db}])
 
-        query = json.loads(functools.reduce(lambda dct, key: dct[key],
-                                            ['saved_objects',
-                                             0,
-                                             'attributes',
-                                             'kibanaSavedObjectMeta',
-                                             'searchSourceJSON'],
-                                            json.loads(req.text)))#['filter'][0]['query']
-
-        logging.debug(query)
+        unpack_query = lambda rsp: json.loads(
+            functools.reduce(lambda dct, key: dct[key],
+                             ['saved_objects',
+                              0,
+                              'attributes',
+                              'kibanaSavedObjectMeta',
+                              'searchSourceJSON'],
+                             json.loads(rsp.text)))#['filter'][0]['query']
 
         rq_vz  = lambda _id: requests.post(
-            base + ARGS['url'],
+            base + get_params('ld')['url'],
             headers = head,
             json    = [{'type': 'visualization', 'id': _id}])
 
-        vz_states = [functools.reduce(
+        vz_states = lambda rsp: [functools.reduce(
             lambda _IN, FUNC: FUNC(_IN),
             [lambda obj  : rq_vz(obj['id']),
              lambda req  : json.loads(req.text),
              lambda resp : resp['saved_objects'][0]['attributes'],
              lambda rsp  : json.loads(rsp['visState'])],
             OBJ)
-        for OBJ in json.loads(req.text)['saved_objects'][0]['references']
+        for OBJ in json.loads(rsp.text)['saved_objects'][0]['references']
         if OBJ['type']=='visualization']
 
-        vz_aggs = [state['aggs'] for state in vz_states if state['title']==viz].pop()
-        logging.debug(vz_aggs)
-
-        AGGS = functools.reduce(parse_aggs,
-                                vz_aggs,
-                                {'vars':{}, 'aggs':{}})
-
-        logging.debug(AGGS)
-
-        for var in list(AGGS['vars']):
-            AGGS['vars'][var]['aggs'] = AGGS['aggs']
-        
-        QRY = {'aggs': AGGS['vars']}
-        logging.info(QRY)
-
-        req  = requests.post(
+        [functools.reduce(
+            lambda _IN, FUNC: FUNC(_IN),
+            [lambda param : req(get_params(param)),
+             vz_states,
+             lambda vz_states: [state['aggs'] for state in vz_states if state['title']==viz].pop(),
+             lambda vz_aggs: functools.reduce(parse_aggs, vz_aggs, {'vars':{}, 'aggs':{}}),
+             build_payload_from_aggs,
+             lambda QRY: requests.post(
             'http://kib.crt.fortilab.net/elasticsearch/dev_*/_search?rest_total_hits_as_int=true&ignore_unavailable=true&ignore_throttled=true&preference=1589486987394&timeout=30000ms',
             headers = head,
-            json    = QRY)
-
-        logging.info(json.loads(req.text)['aggregations'])
+                 json    = QRY),
+             lambda rsp: json.loads(rsp.text)['aggregations'],
+             logging.info],
+            param) for param in ['ld']]
