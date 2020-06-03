@@ -7,17 +7,27 @@ import json
 import random
 import requests
 import string
+import sys
 
-logging.basicConfig(format='%(message)s', level=logging.INFO)
+logging.basicConfig(stream=sys.stdout, format='%(message)s', level=logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-u', '--user-credentials', required=True)
 parser.add_argument('-H', '--host',             required=True)
 group  = parser.add_mutually_exclusive_group(required=True)
+
 group.add_argument('-fd',  '--find-dashboard', nargs='?', const=True)
 group.add_argument('-ld', '--list-dashboard')
-group.add_argument('-sv', '--show-visualization')
+group.add_argument('-sva', '--show-visualization-aggregations')
+group.add_argument('-svd', '--show-visualization-data')
 args = parser.parse_args()        
+
+vz_and_db = (args.show_visualization_aggregations.split(',')[0],
+            args.show_visualization_aggregations.split(',')[1], False) \
+            if args.show_visualization_aggregations \
+            else (args.show_visualization_data.split(',')[0],
+                  args.show_visualization_data.split(',')[1], True) \
+            if args.show_visualization_data else None
 
 gen_rdm_hex = lambda i : random.choice(string.hexdigits)
 
@@ -43,9 +53,16 @@ def get_params(query):
     return {'url'  : url,
             'type' : _type}
 
-def parse_aggs(init, entry):
+def parse_each_aggs(init, entry):
 
-    if entry['type']=='cardinality':
+    if entry['type']=='avg':
+        init['aggs'][entry['id']]  = {
+            'avg': {
+                'field' : entry['params']['field']
+            }
+        }
+    
+    elif entry['type']=='cardinality':
         init['aggs'][entry['id']]  = {
             'cardinality': {
                 'field' : entry['params']['field']
@@ -110,8 +127,22 @@ if __name__=="__main__":
              logging.info
             ], param) for param in ['ld']]
 
-    elif args.show_visualization:
-        viz, db = args.show_visualization.split(',')
+    elif args.show_visualization_aggregations \
+         or args.show_visualization_data:
+        viz, db, choice = vz_and_db
+
+        def if_true_request_data(choice, aggs):
+            if choice:
+                return functools.reduce(
+                    lambda _IN, FUNC: FUNC(_IN),
+                    [parse_all_aggs,
+                     build_payload_from_aggs,
+                     rq_viz_data,
+                     lambda rsp: json.loads(rsp.text)['aggregations']],
+                    aggs)
+            else:
+                return aggs
+
 
         build_payload_from_aggs = lambda aggs: {
             'aggs' : {var_k : {'terms' : aggs['vars'][var_k]['terms'],
@@ -123,6 +154,13 @@ if __name__=="__main__":
             headers = head,
             json    = [{'type': ARGS['type'], 'id': db}])
 
+        parse_all_aggs = lambda vz_aggs: functools.reduce(
+            parse_each_aggs, vz_aggs, {'vars':{}, 'aggs':{}})
+
+        pick_vz_from_all = lambda vz_states: [state['aggs']
+                                              for state in vz_states
+                                              if state['title']==viz].pop()
+        
         unpack_query = lambda rsp: json.loads(
             functools.reduce(lambda dct, key: dct[key],
                              ['saved_objects',
@@ -146,29 +184,23 @@ if __name__=="__main__":
                        'ignore_unavailable'     : 'true',
                        'ignore_throttled'       : 'true'})
 
-        unpack_aggs = lambda aggs: ['{},{}'.format(bag['key'], bag['doc_count'])
-                                    for var in aggs
-                                    for bag in aggs[var]['buckets']]
-
         vz_states = lambda rsp: [functools.reduce(
             lambda _IN, FUNC: FUNC(_IN),
             [lambda obj  : rq_vz(obj['id']),
              lambda req  : json.loads(req.text),
              lambda resp : resp['saved_objects'][0]['attributes'],
-             lambda rsp  : json.loads(rsp['visState'])],
+             lambda rsp  : json.loads(rsp['visState'])
+            ],
             OBJ)
         for OBJ in json.loads(rsp.text)['saved_objects'][0]['references']
         if OBJ['type']=='visualization']
-
+        
         [functools.reduce(
             lambda _IN, FUNC: FUNC(_IN),
             [lambda param : req(get_params(param)),
              vz_states,
-             lambda vz_states: [state['aggs'] for state in vz_states if state['title']==viz].pop(),
-             lambda vz_aggs: functools.reduce(parse_aggs, vz_aggs, {'vars':{}, 'aggs':{}}),
-             build_payload_from_aggs,
-             rq_viz_data,
-             lambda rsp: json.loads(rsp.text)['aggregations'],
-             lambda aggs: '\n'.join(unpack_aggs(aggs)),
+             pick_vz_from_all,
+             lambda aggs: if_true_request_data(choice,aggs),
+             json.dumps,
              logging.info],
             param) for param in ['ld']]
