@@ -39,5 +39,57 @@ dev_session-policy30throughput-rxtx
 
 ## Hence, CSV a visualization
 ```
-./kibkit -u USER:PSWD -H HOST -fd -sv beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2
+./kibkit -u USER:PSWD -H HOST -fd -svd beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2
+
+```
+
+## Or, aggregations sent to Kibana
+```
+./kibkit -u USER:PSWD -H HOST -fd -sva beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2 | python -mjson.tool
+[
+    {
+        "id": "1",
+        "enabled": true,
+        "type": "cardinality",
+        "schema": "metric",
+        "params": {
+            "field": "src_ip",
+            "customLabel": "Unique IP SRC"
+        }
+    },
+    {
+        "id": "2",
+        "enabled": true,
+        "type": "cardinality",
+        "schema": "metric",
+        "params": {
+            "field": "dst_ip",
+            "customLabel": "Unique IP DST"
+        }
+    },
+    {
+        "id": "3",
+        "enabled": true,
+        "type": "terms",
+        "schema": "segment",
+        "params": {
+            "field": "vd_policy_id.raw",
+            "orderBy": "custom",
+            "orderAgg": {
+                "id": "3-orderAgg",
+                "enabled": true,
+                "type": "count",
+                "schema": "orderAgg",
+                "params": {}
+            },
+            "order": "desc",
+            "size": 60,
+            "otherBucket": false,
+            "otherBucketLabel": "Other",
+            "missingBucket": false,
+            "missingBucketLabel": "Missing",
+            "customLabel": "VDOM_Policy"
+        }
+    }
+]
 ```
