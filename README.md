@@ -1,9 +1,9 @@
 # kibkit
 Pulls CSV from Kibana visualization
 
-## Lists dashboards
+## List dashboards
 ```
-./kibkit -u USER:PSWD -H HOST -fd
+./kibkit -u USER:PSWD -H HOST -ld
 
 73a133b0-7325-11ea-b36a-87ca4a6a28f0,dev_session
 c3e418b0-7f23-11ea-9a41-e372321608d2,dev_session-requirements
@@ -13,7 +13,7 @@ ee00ecc0-8092-11ea-9a41-e372321608d2,req_sessions
 
 ## Then visualizations within a dashboard
 ```
-./kibkit -u USER:PSWD -H HOST -fd -ld 6fd956d0-84ab-11ea-9a41-e372321608d2
+./kibkit -u USER:PSWD -H HOST -lv 6fd956d0-84ab-11ea-9a41-e372321608d2
 
 beta_session-policy20
 beta_session-policy20-proto
@@ -37,15 +37,15 @@ beta_session-ipunique
 dev_session-policy30throughput-rxtx
 ```
 
-## Hence, CSV a visualization
+## Hence, get visualization data in CSV
 ```
-./kibkit -u USER:PSWD -H HOST -fd -svd beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2
+./kibkit -u USER:PSWD -H HOST -svd beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2
 
 ```
 
 ## Or, aggregations sent to Kibana
 ```
-./kibkit -u USER:PSWD -H HOST -fd -sva beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2 | python -mjson.tool
+./kibkit -u USER:PSWD -H HOST -sva beta_session-ipunique,6fd956d0-84ab-11ea-9a41-e372321608d2 | python -mjson.tool
 [
     {
         "id": "1",
