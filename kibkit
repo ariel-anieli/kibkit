@@ -80,6 +80,14 @@ def parse_each_aggs(init, entry):
             }
         }
 
+    elif entry['type']=='range':
+        init['aggs'][entry['id']] = {
+            'range': {
+                'field' : entry['params']['field'],
+                'ranges' : entry['params']['ranges']
+            }
+        }
+
     return init
 
 if __name__=="__main__":
@@ -147,7 +155,7 @@ if __name__=="__main__":
         build_payload_from_aggs = lambda aggs: {
             'aggs' : {var_k : {'terms' : aggs['vars'][var_k]['terms'],
                                'aggs'  : aggs['aggs']}
-                      for var_k in aggs['vars']}}
+                      for var_k in aggs['vars']} if aggs['vars'] else aggs['aggs']}
 
         req  = lambda ARGS: requests.post(
             base + ARGS['url'],
@@ -200,7 +208,7 @@ if __name__=="__main__":
             [lambda param : req(get_params(param)),
              vz_states,
              pick_vz_from_all,
-             lambda aggs: if_true_request_data(choice,aggs),
+             lambda aggs: if_true_request_data(choice, aggs),
              json.dumps,
              logging.info],
             param) for param in ['ld']]
