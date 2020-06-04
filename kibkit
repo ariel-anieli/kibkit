@@ -16,8 +16,8 @@ parser.add_argument('-u', '--user-credentials', required=True)
 parser.add_argument('-H', '--host',             required=True)
 group  = parser.add_mutually_exclusive_group(required=True)
 
-group.add_argument('-fd',  '--find-dashboard', nargs='?', const=True)
-group.add_argument('-ld', '--list-dashboard')
+group.add_argument('-ld',  '--list-dashboards', nargs='?', const=True)
+group.add_argument('-lv',  '--list-visualizations')
 group.add_argument('-sva', '--show-visualization-aggregations')
 group.add_argument('-svd', '--show-visualization-data')
 args = parser.parse_args()        
@@ -38,24 +38,16 @@ head = {'Content-Type' : 'application/json',
 
 def fold_if_true_and_apply(args, *funcs, _if=lambda pred: pred):
     return [functools.reduce(
-        lambda _IN, FUNC: FUNC(_IN),
+        lambda _in, func: func(_in),
         funcs,
         arg) for arg in args if _if(arg)]
-    
-
-def get_id_and_tle_for_dashboards(objs):
-    return [functools.reduce(
-        lambda _IN, FUNC: FUNC(_IN),
-        [lambda obj: (obj["id"],obj["attributes"]["title"]),
-         lambda pair: "{},{}".format(pair[0], pair[1])],
-        obj) for obj in objs]
 
 def get_params(query):
-    url   = {'fd' : '/api/saved_objects/_find',
-             'ld' : '/api/saved_objects/_bulk_get'}[query]
+    url   = {'ld' : '/api/saved_objects/_find',
+             'lv' : '/api/saved_objects/_bulk_get'}[query]
 
-    _type = {'fd' : 'dashboard',
-             'ld' : 'dashboard'}[query]
+    _type = {'ld' : 'dashboard',
+             'lv' : 'dashboard'}[query]
 
     return {'url'  : url,
             'type' : _type}
@@ -99,55 +91,62 @@ def parse_each_aggs(init, entry):
 
 if __name__=="__main__":
 
-    if args.find_dashboard:
+    if args.list_dashboards:
 
-        req  = lambda ARGS : requests.get(base + ARGS['url'],
-                                          headers = head,
-                                          params  = {'type': ARGS['type']})
+        get_id_and_tle_of_db = lambda objs: fold_if_true_and_apply(
+            objs,
+            lambda obj: (obj["id"],obj["attributes"]["title"]),
+            lambda pair: "{},{}".format(pair[0], pair[1]))
 
+        req_db = lambda params: requests.get(
+            base + params['url'],
+            headers = head,
+            params  = {'type': params['type']})
+        
         fold_if_true_and_apply(
-            ['fd'],
-            lambda param : req(get_params(param)),
-            lambda rsp   : json.loads(rsp.text)["saved_objects"],
-            lambda objs  : '\n'.join(get_id_and_tle_for_dashboards(objs)),
+            ['ld'],
+            lambda _in  : req_db(get_params(_in)),
+            lambda resp : json.loads(resp.text)["saved_objects"],
+            lambda objs : '\n'.join(get_id_and_tle_of_db(objs)),
             logging.info)
         
-    elif args.list_dashboard:
+    elif args.list_visualizations:
 
-        req  = lambda ARGS : requests.post(
+        req_db  = lambda ARGS : requests.post(
             base + ARGS['url'],
             headers = head,
-            json    = [{'type': ARGS['type'], 'id': args.list_dashboard}])
+            json    = [{'type': ARGS['type'],
+                        'id'  : args.list_visualizations}])
 
         rq_vz  = lambda _id: requests.post(
-            base + get_params('ld')['url'],
+            base + get_params('lv')['url'],
             headers = head,
-            json    = [{'type': 'visualization', 'id': _id}])
+            json    = [{'type' : 'visualization',
+                        'id'   : _id}])
 
-        get_vz_tle_in_dashboard = lambda objs: fold_if_true_and_apply(
-            objs,
-            lambda obj  : rq_vz(obj['id']),
-            lambda req  : json.loads(req.text),
-            lambda resp : resp['saved_objects'][0]['attributes'],
-            lambda rsp  : json.loads(rsp['visState'])['title'],
+        get_vz_tle_in_dashboard = lambda refs: fold_if_true_and_apply(
+            refs,
+            lambda ref  : rq_vz(ref['id']),
+            lambda req  : json.loads(req.text)['saved_objects'],
+            lambda objs : objs[0]['attributes'],
+            lambda atts : json.loads(atts['visState'])['title'],
             _if=lambda obj: obj['type']=='visualization')
 
         fold_if_true_and_apply(
-            ['ld'],
-            lambda param : req(get_params(param)),
-            lambda rsp   : json.loads(rsp.text),
-            lambda obj   : obj['saved_objects'][0]['references'],
-            lambda objs  : '\n'.join(get_vz_tle_in_dashboard(objs)),
+            ['lv'],
+            lambda _in  : req_db(get_params(_in)),
+            lambda rsp  : json.loads(rsp.text)['saved_objects'],
+            lambda objs : objs[0]['references'],
+            lambda refs : '\n'.join(get_vz_tle_in_dashboard(refs)),
             logging.info)
-        
-    elif args.show_visualization_aggregations \
-         or args.show_visualization_data:
+
+    elif args.show_visualization_aggregations or args.show_visualization_data:
         viz, db, choice = vz_and_db
 
-        def if_true_request_data(choice, aggs):
+        def if_true_request_viz_data(choice, aggs):
             if choice:
                 return functools.reduce(
-                    lambda _IN, FUNC: FUNC(_IN),
+                    lambda _in, func: func(_in),
                     [parse_all_aggs,
                      build_payload_from_aggs,
                      rq_viz_data,
@@ -155,7 +154,6 @@ if __name__=="__main__":
                     aggs)
             else:
                 return aggs
-
 
         build_payload_from_aggs = lambda aggs: {
             'aggs' : {var_k : {'terms' : aggs['vars'][var_k]['terms'],
@@ -184,7 +182,7 @@ if __name__=="__main__":
                              json.loads(rsp.text)))#['filter'][0]['query']
 
         rq_vz  = lambda _id: requests.post(
-            base + get_params('ld')['url'],
+            base + get_params('lv')['url'],
             headers = head,
             json    = [{'type': 'visualization', 'id': _id}])
 
@@ -206,10 +204,10 @@ if __name__=="__main__":
             _if=lambda OBJ  : OBJ['type']=='visualization')
 
         fold_if_true_and_apply(
-            ['ld'],
+            ['lv'],
             lambda param : req(get_params(param)),
             vz_states,
             pick_vz_from_all,
-            lambda aggs: if_true_request_data(choice, aggs),
+            lambda aggs: if_true_request_viz_data(choice, aggs),
             json.dumps,
             logging.info)
