@@ -1,10 +1,12 @@
 #!/usr/bin/python
 
 import argparse
+import datetime
 import functools
 import logging
 import json
 import random
+import re
 import requests
 import string
 import sys
@@ -14,6 +16,7 @@ logging.basicConfig(stream=sys.stdout, format='%(message)s', level=logging.INFO)
 parser = argparse.ArgumentParser()
 parser.add_argument('-u', '--user-credentials', required=True)
 parser.add_argument('-H', '--host',             required=True)
+parser.add_argument('-t', '--time-interval',    default='/PT1H')
 group  = parser.add_mutually_exclusive_group(required=True)
 
 group.add_argument('-ld',  '--list-dashboards', nargs='?', const=True)
@@ -41,6 +44,38 @@ def fold_if_true_and_apply(args, *funcs, _if=lambda pred: pred):
         lambda _in, func: func(_in),
         funcs,
         arg) for arg in args if _if(arg)]
+
+def build_time_interval(_time):
+
+    def scan_time(init, pattern):
+        match = re.search(pattern[0], init['sch']).group(0) \
+            if re.search(pattern[0], init['sch']) else 0
+        init['sch'] = re.sub(pattern[1], '', init['sch'])
+        init['fnd'].append(int(match))
+
+        return init
+
+    return {
+        key : value
+        for key,value in zip(
+                ['year',
+                 'month',
+                 'day',
+                 'hour',
+                 'minute',
+                 'second']
+                , functools.reduce(
+                    scan_time,
+                    [('(?<=P)\d+(?=Y)',  '(?<=P)\d+Y'),
+                     ('(?<=P)\d+(?=M)',  '(?<=P)\d+M'),
+                     ('(?<=P)\d+(?=D)',  '(?<=P)\d+D'),
+                     ('(?<=PT)\d+(?=H)', '(?<=PT)\d+H'),
+                     ('(?<=PT)\d+(?=M)', '(?<=PT)\d+M'),
+                     ('(?<=PT)\d+(?=S)', '(?<=PT)\d+S')],
+                    {'fnd' : [],
+                     'sch' : _time}
+                )['fnd']
+        )}
 
 def get_params(query):
     url   = {'ld' : '/api/saved_objects/_find',
@@ -102,14 +137,14 @@ if __name__=="__main__":
             objs,
             lambda obj: (obj["id"],obj["attributes"]["title"]),
             lambda out: "{},{}".format(out[0], out[1]))
-        
+
         fold_if_true_and_apply(
             ['ld'],
             lambda _in  : get_db(get_params(_in)),
             lambda resp : json.loads(resp.text)["saved_objects"],
             lambda objs : '\n'.join(get_id_and_tle_of_db(objs)),
             logging.info)
-        
+
     elif args.list_visualizations:
 
         get_db  = lambda ARGS : requests.post(
@@ -142,6 +177,31 @@ if __name__=="__main__":
 
     elif args.show_visualization_aggregations or args.show_visualization_data:
         vz, db, choice = vz_and_db
+
+        add_time_in_qry = lambda aggs, date, shift: {
+            'aggs'  : aggs['aggs'],
+            'query' : {
+                'bool' : {
+                    'filter' : [
+                        {
+                            'range' : {
+                                'timestamp' : {
+                                    'lte' : date.isoformat(),
+                                    'gte' : date.replace(
+                                        year   = date.year   - shift['year'],
+                                        month  = date.month  - shift['month'],
+                                        day    = date.day    - shift['day'],
+                                        hour   = date.hour   - shift['hour'],
+                                        minute = date.minute - shift['minute'],
+                                        second = date.hour   - shift['second']
+                                    ).isoformat()
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
 
         build_payload_from_aggs = lambda aggs: {
             'aggs' : {var_k : {
@@ -179,10 +239,12 @@ if __name__=="__main__":
         if_true_get_vz_data = lambda choice, vz: functools.reduce(
             lambda _in, func: func(_in),
             [parse_all_aggs,
-            build_payload_from_aggs,
-            get_vz_data,
-            lambda rsp: json.loads(rsp.text)['aggregations']],
-            vz) if choice else vz
+             build_payload_from_aggs,
+             lambda load: (load, build_time_interval(args.time_interval)),
+             lambda _: add_time_in_qry(_[0], datetime.datetime.utcnow(), _[1]),
+             get_vz_data,
+             lambda rsp: json.loads(rsp.text)['aggregations']
+            ], vz) if choice else vz
 
         parse_all_aggs   = lambda vz: functools.reduce(
             parse_each_aggs, vz, {'vars':{}, 'aggs':{}})
@@ -198,7 +260,7 @@ if __name__=="__main__":
                               'attributes',
                               'kibanaSavedObjectMeta',
                               'searchSourceJSON'],
-                             json.loads(rsp.text)))#['filter'][0]['query']
+                             json.loads(rsp.text)))['filter'][0]['query']
 
         fold_if_true_and_apply(
             ['lv'],
