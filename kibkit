@@ -5,6 +5,7 @@ import datetime
 import functools
 import logging
 import json
+import operator
 import random
 import re
 import requests
@@ -178,28 +179,33 @@ if __name__=="__main__":
     elif args.show_visualization_aggregations or args.show_visualization_data:
         vz, db, choice = vz_and_db
 
-        add_time_in_qry = lambda aggs, date, shift: {
+        if re.match('^\d.*P', args.time_interval):
+            _date, span    = args.time_interval.split('/')
+        elif not re.search('P', args.time_interval):
+            _date = args.time_interval
+            span = 'P1H'
+        elif re.search('^P', args.time_interval):
+            _date = ''
+            span = args.time_interval
+
+        add_or_sub = operator.add if _date else operator.sub
+
+        get_time = lambda _date: datetime.datetime.utcnow() \
+            if not _date else datetime.datetime.fromisoformat(_date)
+
+        add_time_in_qry = lambda aggs, args: {
             'aggs'  : aggs['aggs'],
-            'query' : {
-                'bool' : {
-                    'filter' : [
-                        {
-                            'range' : {
-                                'timestamp' : {
-                                    'lte' : date.isoformat(),
-                                    'gte' : date.replace(
-                                        year   = date.year   - shift['year'],
-                                        month  = date.month  - shift['month'],
-                                        day    = date.day    - shift['day'],
-                                        hour   = date.hour   - shift['hour'],
-                                        minute = date.minute - shift['minute'],
-                                        second = date.hour   - shift['second']
-                                    ).isoformat()
-                                }
-                            }
-                        }
-                    ]
+            'query' :
+            {'bool' :
+             {'filter' :
+              [{'range' :
+                {'timestamp' :
+                 {'lte' : args['shift'] if args['op']==operator.add else args['start'],
+                  'gte' : args['shift'] if args['op']==operator.sub else args['start']
+                 }
                 }
+            }]
+        }
             }
         }
 
@@ -236,12 +242,26 @@ if __name__=="__main__":
             lambda atts  : json.loads(atts['visState']),
             _if=lambda obj: obj['type']=='visualization')
 
+        shift_time = lambda _date, shift, add_or_sub: {
+            'op'    : add_or_sub,
+            'start' : _date.isoformat(),
+            'shift' : _date.replace(
+                year   = add_or_sub(_date.year,   shift['year']),
+                month  = add_or_sub(_date.month,  shift['month']),
+                day    = add_or_sub(_date.day,    shift['day']),
+                hour   = add_or_sub(_date.hour,   shift['hour']),
+                minute = add_or_sub(_date.minute, shift['minute']),
+                second = add_or_sub(_date.second, shift['second'])
+            ).isoformat()
+        }
+
         if_true_get_vz_data = lambda choice, vz: functools.reduce(
             lambda _in, func: func(_in),
             [parse_all_aggs,
              build_payload_from_aggs,
-             lambda load: (load, build_time_interval(args.time_interval)),
-             lambda _: add_time_in_qry(_[0], datetime.datetime.utcnow(), _[1]),
+             lambda load: (load, build_time_interval(span)),
+             lambda _: (_[0], shift_time(get_time(_date), _[1], add_or_sub)),
+             lambda _: add_time_in_qry(_[0], _[1]),
              get_vz_data,
              lambda rsp: json.loads(rsp.text)['aggregations']
             ], vz) if choice else vz
